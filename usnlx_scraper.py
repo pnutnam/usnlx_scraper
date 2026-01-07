@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 from typing import List, Dict
 import time
 import config
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class USNLXScraper:
@@ -285,10 +286,41 @@ class USNLXScraper:
                         details['summary'] = para[:300] + '...' if len(para) > 300 else para
                         break
             
+            # Extract posted date from JSON-LD structured data
+            try:
+                import json as json_module
+                import re
+                json_ld_scripts = soup.find_all('script', type='application/ld+json')
+                for script in json_ld_scripts:
+                    try:
+                        data = json_module.loads(script.string)
+                        if isinstance(data, dict) and 'datePosted' in data:
+                            details['posted_date'] = data['datePosted']
+                            break
+                    except:
+                        continue
+            except Exception as e:
+                pass  # posted_date will remain None
+            
         except Exception as e:
             print(f"Error extracting job details from {job_url}: {e}")
         
         return details
+    
+    def _extract_job_details_with_index(self, index: int, job: Dict, total: int) -> Dict:
+        """
+        Extract job details with progress reporting (for parallel execution).
+        
+        Args:
+            index: Job index (1-based)
+            job: Job dictionary containing URL
+            total: Total number of jobs
+        
+        Returns:
+            Dictionary with detailed job information
+        """
+        print(f"  [{index}/{total}] {job['title'][:50]}...")
+        return self._extract_job_details(job['url'])
     
     def _set_distance_filter(self, radius_miles: int) -> bool:
         """
@@ -419,15 +451,31 @@ class USNLXScraper:
             
             # Extract details if requested
             if extract_details:
-                print(f"Extracting details for {len(jobs)} jobs...")
+                print(f"Extracting details for {len(jobs)} jobs in parallel (10 at a time)...")
                 detailed_jobs = []
-                for i, job in enumerate(jobs, 1):
-                    print(f"  [{i}/{len(jobs)}] {job['title']} at {job['company']}")
-                    details = self._extract_job_details(job['url'])
-                    # Merge details into job
-                    job.update(details)
-                    detailed_jobs.append(job)
+                
+                # Use ThreadPoolExecutor for parallel scraping
+                with ThreadPoolExecutor(max_workers=10) as executor:
+                    # Submit all jobs for detail extraction
+                    future_to_job = {
+                        executor.submit(self._extract_job_details_with_index, i, job, len(jobs)): job 
+                        for i, job in enumerate(jobs, 1)
+                    }
+                    
+                    # Collect results as they complete
+                    for future in as_completed(future_to_job):
+                        job = future_to_job[future]
+                        try:
+                            details = future.result()
+                            # Merge details into job
+                            job.update(details)
+                            detailed_jobs.append(job)
+                        except Exception as e:
+                            print(f"  Error extracting details for {job['title']}: {e}")
+                            detailed_jobs.append(job)  # Add job without details
+                
                 jobs = detailed_jobs
+                print(f"✓ Completed detail extraction for {len(jobs)} jobs")
             
             return jobs
             

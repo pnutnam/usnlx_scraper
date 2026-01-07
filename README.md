@@ -12,8 +12,11 @@ A Python scraper for pulling job listings from **USNLX.com** (National Labor Exc
 
 ## Installation
 
-1. **Clone or navigate to the project directory:**
+1. **Clone the repository:**
 
+   ```bash
+   cd /home/nate/.gemini/antigravity/scratch/job_scraper
+   ```
 
 2. **Install dependencies:**
 
